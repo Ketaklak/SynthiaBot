@@ -258,7 +258,7 @@ class Moderation(commands.Cog):
         for key in to_remove:
             del self.temp_roles[key]
 
-    @commands.hybrid_command(name="remindme")
+    @commands.hybrid_command(name="remindme",description="Pour ajouter un rappel")
     @commands.has_permissions(manage_roles=True)
     async def remindme(self, ctx: commands.Context,
                         action: str,
@@ -287,7 +287,7 @@ class Moderation(commands.Cog):
         for key in to_remind:
             del self.pending_actions[key]
 
-    @commands.hybrid_command(name="stats")
+    @commands.hybrid_command(name="stats", description="Stats de modération")
     @commands.has_permissions(administrator=True)
     async def stats(self, ctx: commands.Context):
         """Affiche les statistiques de modération."""
