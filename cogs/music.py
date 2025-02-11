@@ -10,7 +10,7 @@ YTDL_OPTS = {
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
-    'noplaylist': True,
+    'noplaylist': False,
     'nocheckcertificate': True,
     'ignoreerrors': False,
     'logtostderr': False,
@@ -27,13 +27,11 @@ FFMPEG_OPTS = {
     'options': '-vn'
 }
 
-
 class Song:
     def __init__(self, data):
         self.data = data
         self.title = data.get('title')
         self.duration = data.get('duration')
-
 
 class MusicPlayer:
     def __init__(self, ctx: commands.Context):
@@ -45,7 +43,7 @@ class MusicPlayer:
     async def play_next(self):
         """Joue la musique suivante dans la file, sinon déconnecte après 60s."""
         if len(self.queue) == 0:
-            await self.ctx.send("✅ File d'attente vide. Déconnexion dans 60 secondes...")
+            await self.send_message("✅ File d'attente vide. Déconnexion dans 60 secondes...")
             await asyncio.sleep(60)
             # Si rien ne se joue encore, on quitte
             if self.ctx.voice_client and not self.ctx.voice_client.is_playing():
@@ -88,8 +86,13 @@ class MusicPlayer:
         self.ctx.voice_client.source = discord.PCMVolumeTransformer(self.ctx.voice_client.source)
         self.ctx.voice_client.source.volume = self.volume
 
-        await self.ctx.send(f"🎶 En cours de lecture : **{self.current.title}**")
+        await self.send_message(f"🎶 En cours de lecture : **{self.current.title}**")
 
+    async def send_message(self, message):
+        if isinstance(self.ctx, discord.Interaction):
+            await self.ctx.interaction.followup.send(message)
+        else:
+            await self.ctx.send(message)
 
 class Music(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -108,27 +111,27 @@ class Music(commands.Cog):
     @commands.hybrid_command(name="join", description="Rejoint le canal vocal")
     async def join(self, ctx: commands.Context):
         """Commande explicite pour se connecter au canal vocal."""
-        if ctx.interaction and not ctx.interaction.response.is_done():
+        if isinstance(ctx, discord.Interaction) and not ctx.interaction.response.is_done():
             try:
                 await ctx.defer()
             except Exception as e:
                 logging.error("Erreur lors du defer : %s", e)
 
         if not ctx.author.voice:
-            return await ctx.send("❌ Vous devez être dans un canal vocal !")
+            return await self.send_message(ctx, "❌ Vous devez être dans un canal vocal !")
 
         voice_client = ctx.voice_client
         if voice_client:
             if voice_client.channel == ctx.author.voice.channel:
-                return await ctx.send("✅ Déjà connecté à votre canal vocal !")
+                return await self.send_message(ctx, "✅ Déjà connecté à votre canal vocal !")
             else:
                 await voice_client.move_to(ctx.author.voice.channel)
         else:
             await ctx.author.voice.channel.connect()
 
-        await ctx.send(f"✅ Connecté à {ctx.author.voice.channel.mention}")
+        await self.send_message(ctx, f"✅ Connecté à {ctx.author.voice.channel.mention}")
 
-    @commands.hybrid_command(name="play", description="Joue une musique depuis YouTube")
+    @commands.command(name="play", description="Joue une musique depuis YouTube")
     async def play(self, ctx: commands.Context, *, query: str):
         # 1) Si c'est un slash et qu'on n'a pas encore répondu, on défère immédiatement
         if isinstance(ctx, discord.Interaction) and not ctx.interaction.response.is_done():
@@ -137,11 +140,7 @@ class Music(commands.Cog):
         # 2) Vérifier que l'utilisateur est en vocal
         if not ctx.author.voice:
             msg = "❌ Vous devez être dans un canal vocal !"
-            # Si slash, on followup, sinon on fait un simple send
-            if isinstance(ctx, discord.Interaction):
-                return await ctx.interaction.followup.send(msg)
-            else:
-                return await ctx.send(msg)
+            return await self.send_message(ctx, msg)
 
         # 3) Connecter le bot si besoin
         voice_client = ctx.voice_client
@@ -166,10 +165,7 @@ class Music(commands.Cog):
             except Exception as e2:
                 logging.error("Erreur lors de l'extraction (direct) : %s", e2)
                 msg = "❌ Impossible de trouver la musique demandée."
-                if isinstance(ctx, discord.Interaction):
-                    return await ctx.interaction.followup.send(msg)
-                else:
-                    return await ctx.send(msg)
+                return await self.send_message(ctx, msg)
 
         # 5) Ajouter la musique à la file
         player = self.get_player(ctx)
@@ -182,16 +178,13 @@ class Music(commands.Cog):
 
         # 7) Réponse finale
         final_msg = f"🎵 **{song.title}** ajouté à la file d'attente"
-        if isinstance(ctx, discord.Interaction):
-            await ctx.interaction.followup.send(final_msg)
-        else:
-            await ctx.send(final_msg)
+        await self.send_message(ctx, final_msg)
 
     @commands.hybrid_command(name="queue", description="Affiche la file d'attente")
     async def queue(self, ctx: commands.Context):
         player = self.get_player(ctx)
         if not player.queue:
-            return await ctx.send("❌ La file d'attente est vide !")
+            return await self.send_message(ctx, "❌ La file d'attente est vide !")
 
         embed = discord.Embed(title="🎶 File d'attente", color=discord.Color.blue())
         for i, song in enumerate(player.queue, 1):
@@ -200,36 +193,36 @@ class Music(commands.Cog):
                 value=f"Durée : {song.duration}s",
                 inline=False
             )
-        await ctx.send(embed=embed)
+        await self.send_message(ctx, embed=embed)
 
     @commands.hybrid_command(name="skip", description="Passe à la musique suivante")
     async def skip(self, ctx: commands.Context):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
-            await ctx.send("⏭ Musique suivante...")
+            await self.send_message(ctx, "⏭ Musique suivante...")
         else:
-            await ctx.send("❌ Aucune musique en cours de lecture !")
+            await self.send_message(ctx, "❌ Aucune musique en cours de lecture !")
 
     @commands.hybrid_command(name="pause", description="Met la musique en pause")
     async def pause(self, ctx: commands.Context):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
-            await ctx.send("⏸ Musique en pause")
+            await self.send_message(ctx, "⏸ Musique en pause")
         else:
-            await ctx.send("❌ Aucune musique en cours de lecture !")
+            await self.send_message(ctx, "❌ Aucune musique en cours de lecture !")
 
     @commands.hybrid_command(name="resume", description="Reprend la musique")
     async def resume(self, ctx: commands.Context):
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
-            await ctx.send("▶ Reprise de la lecture")
+            await self.send_message(ctx, "▶ Reprise de la lecture")
         else:
-            await ctx.send("❌ La lecture n'est pas en pause !")
+            await self.send_message(ctx, "❌ La lecture n'est pas en pause !")
 
     @commands.hybrid_command(name="volume", description="Ajuste le volume (0-100)")
     async def volume(self, ctx: commands.Context, volume: int):
         if volume < 0 or volume > 100:
-            return await ctx.send("❌ Le volume doit être entre 0 et 100 !")
+            return await self.send_message(ctx, "❌ Le volume doit être entre 0 et 100 !")
 
         player = self.get_player(ctx)
         player.volume = volume / 100
@@ -237,13 +230,13 @@ class Music(commands.Cog):
         if ctx.voice_client and ctx.voice_client.source:
             ctx.voice_client.source.volume = player.volume
 
-        await ctx.send(f"🔉 Volume ajusté à {volume}%")
+        await self.send_message(ctx, f"🔉 Volume ajusté à {volume}%")
 
     @commands.hybrid_command(name="leave", description="Fait quitter le canal vocal au bot")
     async def leave(self, ctx: commands.Context):
         """Déconnecte le bot du canal vocal."""
         # Si on est en slash, on "defer" la réponse si besoin
-        if ctx.interaction and not ctx.interaction.response.is_done():
+        if isinstance(ctx, discord.Interaction) and not ctx.interaction.response.is_done():
             try:
                 await ctx.defer()
             except Exception as e:
@@ -252,10 +245,15 @@ class Music(commands.Cog):
         voice_client = ctx.voice_client
         if voice_client and voice_client.is_connected():
             await voice_client.disconnect()
-            await ctx.send("✅ Déconnecté du canal vocal.")
+            await self.send_message(ctx, "✅ Déconnecté du canal vocal.")
         else:
-            await ctx.send("❌ Le bot n'est pas connecté à un canal vocal.")
+            await self.send_message(ctx, "❌ Le bot n'est pas connecté à un canal vocal.")
 
+    async def send_message(self, ctx, message):
+        if isinstance(ctx, discord.Interaction):
+            await ctx.interaction.followup.send(message)
+        else:
+            await ctx.send(message)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Music(bot))
